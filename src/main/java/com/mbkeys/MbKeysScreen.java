@@ -33,7 +33,7 @@ public class MbKeysScreen extends Screen {
         List<KeyBinding> cur = new ArrayList<>();
         int used = 0;
         for (KeyBinding kb : this.client.options.allKeys) {
-            int rows = 1 + MbKeysClient.extrasOf(kb.getTranslationKey()).size();
+            int rows = 1 + MbKeysClient.extrasOf(MbKeysClient.idOf(kb)).size();
             if (!cur.isEmpty() && used + rows > pageRows) {
                 pages.add(cur);
                 cur = new ArrayList<>();
@@ -49,7 +49,7 @@ public class MbKeysScreen extends Screen {
         int y = 34;
         if (!pages.isEmpty()) {
             for (KeyBinding kb : pages.get(page)) {
-                final String name = kb.getTranslationKey();
+                final String name = MbKeysClient.idOf(kb);
 
                 // header row: [+] [Action name (normal key)]
                 addDrawableChild(ButtonWidget.builder(Text.literal("+"), b -> {

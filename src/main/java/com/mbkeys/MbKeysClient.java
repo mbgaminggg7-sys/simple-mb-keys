@@ -70,6 +70,11 @@ public class MbKeysClient implements ClientModInitializer {
 
     // ---------------------------------------------------------- public api
 
+    /** The id of a key binding, e.g. "key.jump". (Renamed from getTranslationKey in 1.21.9+.) */
+    public static String idOf(KeyBinding kb) {
+        return kb.getId();
+    }
+
     public static List<String> extrasOf(String action) {
         List<String> l = EXTRAS.get(action);
         return l == null ? List.of() : l;
@@ -135,7 +140,7 @@ public class MbKeysClient implements ClientModInitializer {
 
         boolean inGame = client.currentScreen == null && client.player != null;
         for (KeyBinding kb : client.options.allKeys) {
-            String name = kb.getTranslationKey();
+            String name = idOf(kb);
             List<String> list = EXTRAS.get(name);
             if (list == null || list.isEmpty()) continue;
 
@@ -243,7 +248,7 @@ public class MbKeysClient implements ClientModInitializer {
 
     static KeyBinding findBinding(MinecraftClient client, String translationKey) {
         for (KeyBinding kb : client.options.allKeys) {
-            if (kb.getTranslationKey().equals(translationKey)) return kb;
+            if (idOf(kb).equals(translationKey)) return kb;
         }
         return null;
     }
@@ -293,7 +298,7 @@ public class MbKeysClient implements ClientModInitializer {
         SuggestionProvider<FabricClientCommandSource> actions = (ctx, builder) -> {
             String typed = builder.getRemainingLowerCase();
             for (KeyBinding kb : MinecraftClient.getInstance().options.allKeys) {
-                String id = kb.getTranslationKey();
+                String id = idOf(kb);
                 if (id.toLowerCase().contains(typed)) builder.suggest(id);
             }
             return builder.buildFuture();
