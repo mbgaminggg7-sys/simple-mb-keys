@@ -3,7 +3,7 @@ package com.mbkeys;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
-import com.mbkeys.mixin.KeyBindingAccessor;
+import com.mbkeys.mixin.KeyMappingAccessor;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
@@ -11,14 +11,11 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
-import net.fabricmc.fabric.api.client.screen.v1.Screens;
-import net.minecraft.client.gui.widget.ButtonWidget;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.util.InputUtil;
-import net.minecraft.text.Text;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.KeyMapping;
+import com.mojang.blaze3d.platform.InputConstants;
+import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 
 import java.io.IOException;
@@ -28,8 +25,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 
-import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.argument;
-import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal;
+import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.argument;
+import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal;
 
 /**
  * MB Keys: lets you bind extra keys to any vanilla (or modded) key binding.
@@ -61,8 +58,8 @@ public class MbKeysClient implements ClientModInitializer {
     // ---------------------------------------------------------- public api
 
     /** The id of a key binding, e.g. "key.jump". (Renamed from getTranslationKey in 1.21.9+.) */
-    public static String idOf(KeyBinding kb) {
-        return kb.getId();
+    public static String idOf(KeyMapping kb) {
+        return kb.getName();
     }
 
     public static List<String> extrasOf(String action) {
@@ -78,8 +75,8 @@ public class MbKeysClient implements ClientModInitializer {
     }
 
     public static void beginCapture(String action, int index, Runnable done) {
-        MinecraftClient client = MinecraftClient.getInstance();
-        long win = client.getWindow().getHandle();
+        Minecraft client = Minecraft.getInstance();
+        long win = GLFW.glfwGetCurrentContext();
         IGNORED.clear();
         for (String id : ALL_IDS) {
             if (isDown(win, id)) IGNORED.add(id);
@@ -115,69 +112,69 @@ public class MbKeysClient implements ClientModInitializer {
     // ---------------------------------------------------------------- tick
 
     /** Only used while you are choosing a new extra key. Normal use is handled instantly by the event hooks below. */
-    private static void tick(MinecraftClient client) {
-        if (client.getWindow() == null || client.options == null) return;
-        if (capturing != null) pollCapture(client, client.getWindow().getHandle());
+    private static void tick(Minecraft client) {
+        if (client.options == null) return;
+        if (capturing != null) pollCapture(client, GLFW.glfwGetCurrentContext());
     }
 
-    // ------------------------------------------- instant hooks (called by KeyBindingMixin)
+    // ------------------------------------------- instant hooks (called by KeyMappingMixin)
 
     /** "k:70" for a keyboard key, "m:2" for a mouse button, null for anything else. */
-    private static String idOfKey(InputUtil.Key key) {
-        String tk = key.getTranslationKey();
-        if (tk.startsWith("key.mouse.")) return "m:" + key.getCode();
-        if (tk.startsWith("key.keyboard.")) return "k:" + key.getCode();
+    private static String idOfKey(InputConstants.Key key) {
+        String tk = key.getName();
+        if (tk.startsWith("key.mouse.")) return "m:" + key.getValue();
+        if (tk.startsWith("key.keyboard.")) return "k:" + key.getValue();
         return null;
     }
 
     /** Runs at the exact moment vanilla registers a key press, so extra keys are as fast as normal ones. */
-    public static void onExtraKeyPressed(InputUtil.Key key) {
+    public static void onExtraKeyPressed(InputConstants.Key key) {
         if (capturing != null || EXTRAS.isEmpty()) return;
-        MinecraftClient client = MinecraftClient.getInstance();
+        Minecraft client = Minecraft.getInstance();
         if (client == null || client.options == null) return;
         String id = idOfKey(key);
         if (id == null) return;
-        for (KeyBinding kb : client.options.allKeys) {
+        for (KeyMapping kb : client.options.keyMappings) {
             List<String> list = EXTRAS.get(idOf(kb));
             if (list != null && list.contains(id)) {
-                KeyBindingAccessor acc = (KeyBindingAccessor) kb;
-                acc.mbkeys$setTimesPressed(acc.mbkeys$getTimesPressed() + 1);
+                KeyMappingAccessor acc = (KeyMappingAccessor) kb;
+                acc.mbkeys$setClickCount(acc.mbkeys$getClickCount() + 1);
             }
         }
     }
 
     /** Runs at the exact moment vanilla holds or releases a key. */
-    public static void onExtraKeySet(InputUtil.Key key, boolean pressed) {
+    public static void onExtraKeySet(InputConstants.Key key, boolean pressed) {
         if (EXTRAS.isEmpty()) return;
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (client == null || client.options == null || client.getWindow() == null) return;
+        Minecraft client = Minecraft.getInstance();
+        if (client == null || client.options == null ) return;
         String id = idOfKey(key);
         if (id == null) return;
-        long win = client.getWindow().getHandle();
-        for (KeyBinding kb : client.options.allKeys) {
+        long win = GLFW.glfwGetCurrentContext();
+        for (KeyMapping kb : client.options.keyMappings) {
             List<String> list = EXTRAS.get(idOf(kb));
             if (list == null || !list.contains(id)) continue;
             if (pressed) {
-                if (capturing == null) kb.setPressed(true);
+                if (capturing == null) kb.setDown(true);
             } else {
                 boolean stillHeld = primaryDown(win, kb);
                 for (String other : list) {
                     if (!other.equals(id) && isDown(win, other)) stillHeld = true;
                 }
-                if (!stillHeld) kb.setPressed(false);
+                if (!stillHeld) kb.setDown(false);
             }
         }
     }
 
-    private static void pollCapture(MinecraftClient client, long win) {
+    private static void pollCapture(Minecraft client, long win) {
         for (String id : ALL_IDS) {
             boolean down = isDown(win, id);
             if (!down) { IGNORED.remove(id); continue; }
             if (IGNORED.contains(id)) continue;
 
-            boolean quiet = client.currentScreen != null;
+            boolean quiet = client.screen != null;
             if (id.equals("k:" + GLFW.GLFW_KEY_ESCAPE)) {
-                if (!quiet) say(client, Text.literal("[MB Keys] Cancelled."), true);
+                if (!quiet) say(client, Component.literal("[MB Keys] Cancelled."), true);
                 endCapture();
                 return;
             }
@@ -191,8 +188,8 @@ public class MbKeysClient implements ClientModInitializer {
             }
             saveConfig();
             if (!quiet) {
-                say(client, Text.literal("[MB Keys] Added " + describeKey(id) + " to ")
-                        .append(Text.translatable(action)), false);
+                say(client, Component.literal("[MB Keys] Added " + describeKey(id) + " to ")
+                        .append(Component.translatable(action)), false);
             }
             endCapture();
             return;
@@ -208,11 +205,11 @@ public class MbKeysClient implements ClientModInitializer {
     }
 
     /** Is the binding's normal (vanilla) key currently held? */
-    private static boolean primaryDown(long win, KeyBinding kb) {
+    private static boolean primaryDown(long win, KeyMapping kb) {
         if (kb.isUnbound()) return false;
         try {
-            String tk = kb.getBoundKeyTranslationKey();
-            int code = InputUtil.fromTranslationKey(tk).getCode();
+            String tk = kb.saveString();
+            int code = InputConstants.getKey(tk).getValue();
             if (tk.startsWith("key.mouse.")) return GLFW.glfwGetMouseButton(win, code) == GLFW.GLFW_PRESS;
             if (tk.startsWith("key.keyboard.")) return GLFW.glfwGetKey(win, code) == GLFW.GLFW_PRESS;
         } catch (Exception ignored) { }
@@ -252,15 +249,15 @@ public class MbKeysClient implements ClientModInitializer {
         return "Key " + code;
     }
 
-    static KeyBinding findBinding(MinecraftClient client, String translationKey) {
-        for (KeyBinding kb : client.options.allKeys) {
+    static KeyMapping findBinding(Minecraft client, String translationKey) {
+        for (KeyMapping kb : client.options.keyMappings) {
             if (idOf(kb).equals(translationKey)) return kb;
         }
         return null;
     }
 
-    private static void say(MinecraftClient client, Text text, boolean actionBar) {
-        if (client.player != null) client.player.sendMessage(text, actionBar);
+    private static void say(Minecraft client, Component text, boolean actionBar) {
+        if (client.player != null) client.player.sendOverlayMessage(text);
     }
 
     // -------------------------------------------------------------- config
@@ -303,7 +300,7 @@ public class MbKeysClient implements ClientModInitializer {
     private static void registerCommands(CommandDispatcher<FabricClientCommandSource> dispatcher) {
         SuggestionProvider<FabricClientCommandSource> actions = (ctx, builder) -> {
             String typed = builder.getRemainingLowerCase();
-            for (KeyBinding kb : MinecraftClient.getInstance().options.allKeys) {
+            for (KeyMapping kb : Minecraft.getInstance().options.keyMappings) {
                 String id = idOf(kb);
                 if (id.toLowerCase().contains(typed)) builder.suggest(id);
             }
@@ -324,18 +321,18 @@ public class MbKeysClient implements ClientModInitializer {
     }
 
     private static int help(FabricClientCommandSource src) {
-        src.sendFeedback(Text.literal("MB Keys commands:"));
-        src.sendFeedback(Text.literal(" /mbkeys               - open the Simple MB Keys screen"));
-        src.sendFeedback(Text.literal(" /mbkeys add <action>    - then press the extra key (Esc cancels)"));
-        src.sendFeedback(Text.literal(" /mbkeys remove <action> - remove all extra keys from an action"));
-        src.sendFeedback(Text.literal(" /mbkeys list            - show your extra keys"));
-        src.sendFeedback(Text.literal(" Example: /mbkeys add key.jump"));
+        src.sendFeedback(Component.literal("MB Keys commands:"));
+        src.sendFeedback(Component.literal(" /mbkeys               - open the Simple MB Keys screen"));
+        src.sendFeedback(Component.literal(" /mbkeys add <action>    - then press the extra key (Esc cancels)"));
+        src.sendFeedback(Component.literal(" /mbkeys remove <action> - remove all extra keys from an action"));
+        src.sendFeedback(Component.literal(" /mbkeys list            - show your extra keys"));
+        src.sendFeedback(Component.literal(" Example: /mbkeys add key.jump"));
         return 1;
     }
 
     private static int list(FabricClientCommandSource src) {
         if (EXTRAS.isEmpty()) {
-            src.sendFeedback(Text.literal("No extra keys yet. Try /mbkeys add key.jump"));
+            src.sendFeedback(Component.literal("No extra keys yet. Try /mbkeys add key.jump"));
             return 1;
         }
         for (Map.Entry<String, List<String>> e : EXTRAS.entrySet()) {
@@ -344,43 +341,43 @@ public class MbKeysClient implements ClientModInitializer {
                 if (i > 0) sb.append(", ");
                 sb.append(describeKey(e.getValue().get(i)));
             }
-            src.sendFeedback(Text.translatable(e.getKey()).append(Text.literal(sb.toString())));
+            src.sendFeedback(Component.translatable(e.getKey()).append(Component.literal(sb.toString())));
         }
         return 1;
     }
 
     private static int openScreen() {
-        MinecraftClient client = MinecraftClient.getInstance();
-        client.send(() -> client.setScreen(new MbKeysScreen(null)));
+        Minecraft client = Minecraft.getInstance();
+        client.tell(() -> client.setScreen(new MbKeysScreen(null)));
         return 1;
     }
 
     private static int add(FabricClientCommandSource src, String action) {
-        MinecraftClient client = MinecraftClient.getInstance();
+        Minecraft client = Minecraft.getInstance();
         if (findBinding(client, action) == null) {
-            src.sendFeedback(Text.literal("Unknown action: " + action + " (use Tab to autocomplete)"));
+            src.sendFeedback(Component.literal("Unknown action: " + action + " (use Tab to autocomplete)"));
             return 0;
         }
         beginCapture(action, -1, null);
-        say(client, Text.literal("[MB Keys] Press the extra key for ")
-                .append(Text.translatable(action)).append(Text.literal(" (Esc to cancel)")), true);
+        say(client, Component.literal("[MB Keys] Press the extra key for ")
+                .append(Component.translatable(action)).append(Component.literal(" (Esc to cancel)")), true);
         return 1;
     }
 
     private static int remove(FabricClientCommandSource src, String action) {
         List<String> removed = EXTRAS.remove(action);
         if (removed == null) {
-            src.sendFeedback(Text.literal("No extra keys on " + action));
+            src.sendFeedback(Component.literal("No extra keys on " + action));
             return 0;
         }
         saveConfig();
-        src.sendFeedback(Text.literal("Removed extra keys from ").append(Text.translatable(action)));
+        src.sendFeedback(Component.literal("Removed extra keys from ").append(Component.translatable(action)));
         return 1;
     }
 
     private static int cancel(FabricClientCommandSource src) {
         stopCapture();
-        src.sendFeedback(Text.literal("Cancelled."));
+        src.sendFeedback(Component.literal("Cancelled."));
         return 1;
     }
 }
