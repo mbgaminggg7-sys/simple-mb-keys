@@ -11,7 +11,6 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.screen.v1.Screens;
 import net.minecraft.client.gui.widget.ButtonWidget;
@@ -40,7 +39,6 @@ import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.lit
 public class MbKeysClient implements ClientModInitializer {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Map<String, List<String>> EXTRAS = new LinkedHashMap<>();
-    private static final Set<String> HELD = new HashSet<>();
     private static final Set<String> IGNORED = new HashSet<>();
     private static final List<String> ALL_IDS = new ArrayList<>();
     private static String capturing = null;
@@ -56,7 +54,6 @@ public class MbKeysClient implements ClientModInitializer {
     public void onInitializeClient() {
         loadConfig();
         ClientTickEvents.START_CLIENT_TICK.register(MbKeysClient::tick);
-        WorldRenderEvents.START_MAIN.register(ctx -> processExtras(MinecraftClient.getInstance()));
         InventoryButtons.register();
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> registerCommands(dispatcher));
     }
@@ -111,57 +108,63 @@ public class MbKeysClient implements ClientModInitializer {
         l.remove(index);
         if (l.isEmpty()) {
             EXTRAS.remove(action);
-            if (HELD.remove(action)) {
-                KeyBinding kb = findBinding(MinecraftClient.getInstance(), action);
-                if (kb != null) kb.setPressed(false);
-            }
         }
         saveConfig();
     }
 
     // ---------------------------------------------------------------- tick
 
+    /** Only used while you are choosing a new extra key. Normal use is handled instantly by the event hooks below. */
     private static void tick(MinecraftClient client) {
         if (client.getWindow() == null || client.options == null) return;
-        long win = client.getWindow().getHandle();
-
-        if (capturing != null) {
-            pollCapture(client, win);
-            return;
-        }
-        processExtras(client);
+        if (capturing != null) pollCapture(client, client.getWindow().getHandle());
     }
 
-    /**
-     * Checks the extra keys. Runs every game tick AND every rendered frame, so an extra key
-     * is noticed as fast as a vanilla key (no waiting for the next 50 ms tick).
-     */
-    private static void processExtras(MinecraftClient client) {
-        if (client.getWindow() == null || client.options == null) return;
+    // ------------------------------------------- instant hooks (called by KeyBindingMixin)
+
+    /** "k:70" for a keyboard key, "m:2" for a mouse button, null for anything else. */
+    private static String idOfKey(InputUtil.Key key) {
+        String tk = key.getTranslationKey();
+        if (tk.startsWith("key.mouse.")) return "m:" + key.getCode();
+        if (tk.startsWith("key.keyboard.")) return "k:" + key.getCode();
+        return null;
+    }
+
+    /** Runs at the exact moment vanilla registers a key press, so extra keys are as fast as normal ones. */
+    public static void onExtraKeyPressed(InputUtil.Key key) {
         if (capturing != null || EXTRAS.isEmpty()) return;
-        long win = client.getWindow().getHandle();
-
-        boolean inGame = client.currentScreen == null && client.player != null;
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.options == null) return;
+        String id = idOfKey(key);
+        if (id == null) return;
         for (KeyBinding kb : client.options.allKeys) {
-            String name = idOf(kb);
-            List<String> list = EXTRAS.get(name);
-            if (list == null || list.isEmpty()) continue;
-
-            boolean down = false;
-            if (inGame) {
-                for (String id : list) {
-                    if (isDown(win, id)) { down = true; break; }
-                }
-            }
-            boolean was = HELD.contains(name);
-            if (down && !was) {
+            List<String> list = EXTRAS.get(idOf(kb));
+            if (list != null && list.contains(id)) {
                 KeyBindingAccessor acc = (KeyBindingAccessor) kb;
                 acc.mbkeys$setTimesPressed(acc.mbkeys$getTimesPressed() + 1);
-                kb.setPressed(true);
-                HELD.add(name);
-            } else if (!down && was) {
-                kb.setPressed(primaryDown(win, kb));
-                HELD.remove(name);
+            }
+        }
+    }
+
+    /** Runs at the exact moment vanilla holds or releases a key. */
+    public static void onExtraKeySet(InputUtil.Key key, boolean pressed) {
+        if (EXTRAS.isEmpty()) return;
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null || client.options == null || client.getWindow() == null) return;
+        String id = idOfKey(key);
+        if (id == null) return;
+        long win = client.getWindow().getHandle();
+        for (KeyBinding kb : client.options.allKeys) {
+            List<String> list = EXTRAS.get(idOf(kb));
+            if (list == null || !list.contains(id)) continue;
+            if (pressed) {
+                if (capturing == null) kb.setPressed(true);
+            } else {
+                boolean stillHeld = primaryDown(win, kb);
+                for (String other : list) {
+                    if (!other.equals(id) && isDown(win, other)) stillHeld = true;
+                }
+                if (!stillHeld) kb.setPressed(false);
             }
         }
     }
@@ -369,10 +372,6 @@ public class MbKeysClient implements ClientModInitializer {
         if (removed == null) {
             src.sendFeedback(Text.literal("No extra keys on " + action));
             return 0;
-        }
-        if (HELD.remove(action)) {
-            KeyBinding kb = findBinding(MinecraftClient.getInstance(), action);
-            if (kb != null) kb.setPressed(false);
         }
         saveConfig();
         src.sendFeedback(Text.literal("Removed extra keys from ").append(Text.translatable(action)));
