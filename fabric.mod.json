@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "mbkeys",
+  "version": "${version}",
+  "name": "Simple MB Keys",
+  "description": "Bind more than one key to the same action.",
+  "authors": ["Your Name"],
+  "license": "MIT",
+  "icon": "assets/mbkeys/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.mbkeys.MbKeysClient"]
+  },
+  "mixins": [
+    { "config": "mbkeys.mixins.json", "environment": "client" }
+  ],
+  "depends": {
+    "fabricloader": ">=0.18.1",
+    "minecraft": "~1.21.11",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
