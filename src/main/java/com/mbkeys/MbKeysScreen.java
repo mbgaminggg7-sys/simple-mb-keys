@@ -16,7 +16,7 @@ public class MbKeysScreen extends Screen {
     private int page = 0;
 
     public MbKeysScreen(Screen parent) {
-        super(Text.literal("Simple MB Keys"));
+        super(Text.literal("SIMPLE MB KEYS"));
         this.parent = parent;
     }
 
@@ -25,7 +25,7 @@ public class MbKeysScreen extends Screen {
         int cx = this.width / 2;
         int x0 = cx - 150;
 
-        addDrawableChild(ButtonWidget.builder(Text.literal("Simple MB Keys"), b -> { })
+        addDrawableChild(ButtonWidget.builder(Text.literal("SIMPLE MB KEYS"), b -> { })
                 .dimensions(cx - 100, 6, 200, 20).build()).active = false;
 
         int pageRows = Math.max(3, (this.height - 34 - 58) / ROW_H);

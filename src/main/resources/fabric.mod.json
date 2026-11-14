@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "mbkeys",
   "version": "${version}",
-  "name": "Simple MB Keys",
+  "name": "SIMPLE MB KEYS",
   "description": "Bind more than one key to the same action.",
   "authors": ["Your Name"],
   "license": "MIT",

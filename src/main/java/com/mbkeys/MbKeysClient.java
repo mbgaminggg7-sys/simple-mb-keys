@@ -11,6 +11,7 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.fabricmc.fabric.api.client.screen.v1.Screens;
 import net.minecraft.client.gui.widget.ButtonWidget;
@@ -55,17 +56,9 @@ public class MbKeysClient implements ClientModInitializer {
     public void onInitializeClient() {
         loadConfig();
         ClientTickEvents.START_CLIENT_TICK.register(MbKeysClient::tick);
+        WorldRenderEvents.START_MAIN.register(ctx -> processExtras(MinecraftClient.getInstance()));
+        InventoryButtons.register();
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> registerCommands(dispatcher));
-
-        // Adds an "MB Keys" button to the vanilla Key Binds screen.
-        String keybindsTitle = Text.translatable("controls.keybinds.title").getString();
-        ScreenEvents.AFTER_INIT.register((client, screen, w, h) -> {
-            if (screen.getTitle().getString().equals(keybindsTitle)) {
-                ButtonWidget b = ButtonWidget.builder(Text.literal("MB Keys"),
-                        btn -> client.setScreen(new MbKeysScreen(screen))).dimensions(8, 6, 70, 20).build();
-                Screens.getButtons(screen).add(b);
-            }
-        });
     }
 
     // ---------------------------------------------------------- public api
@@ -136,7 +129,17 @@ public class MbKeysClient implements ClientModInitializer {
             pollCapture(client, win);
             return;
         }
-        if (EXTRAS.isEmpty()) return;
+        processExtras(client);
+    }
+
+    /**
+     * Checks the extra keys. Runs every game tick AND every rendered frame, so an extra key
+     * is noticed as fast as a vanilla key (no waiting for the next 50 ms tick).
+     */
+    private static void processExtras(MinecraftClient client) {
+        if (client.getWindow() == null || client.options == null) return;
+        if (capturing != null || EXTRAS.isEmpty()) return;
+        long win = client.getWindow().getHandle();
 
         boolean inGame = client.currentScreen == null && client.player != null;
         for (KeyBinding kb : client.options.allKeys) {
