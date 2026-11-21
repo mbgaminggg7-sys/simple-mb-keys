@@ -2,6 +2,12 @@
   "required": true,
   "package": "com.mbkeys.mixin",
   "compatibilityLevel": "JAVA_21",
-  "client": ["KeyMappingAccessor", "KeyMappingMixin"],
-  "injectors": { "defaultRequire": 1 }
+  "client": [
+    "KeyMappingAccessor",
+    "KeyMappingMixin",
+    "SoundOptionsSecretMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
 }

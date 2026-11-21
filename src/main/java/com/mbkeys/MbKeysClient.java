@@ -4,12 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.mbkeys.mixin.KeyMappingAccessor;
-import com.mojang.brigadier.CommandDispatcher;
-import com.mojang.brigadier.arguments.StringArgumentType;
-import com.mojang.brigadier.suggestion.SuggestionProvider;
 import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
-import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.Minecraft;
@@ -25,8 +20,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 
-import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.argument;
-import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal;
 
 /**
  * MB Keys: lets you bind extra keys to any vanilla (or modded) key binding.
@@ -38,6 +31,12 @@ public class MbKeysClient implements ClientModInitializer {
     private static final Map<String, List<String>> EXTRAS = new LinkedHashMap<>();
     private static final Set<String> IGNORED = new HashSet<>();
     private static final List<String> ALL_IDS = new ArrayList<>();
+    private static boolean enabled = true;
+    private static List<String> toggleKeys = new ArrayList<>();
+    private static boolean toggleLatch = false;
+    private static boolean capturingToggle = false;
+    private static final List<String> toggleCaptureKeys = new ArrayList<>();
+    private static Runnable toggleCaptureDone;
     private static String capturing = null;
     private static int capturingIndex = -1;
     private static Runnable onCaptureEnd = null;
@@ -51,8 +50,7 @@ public class MbKeysClient implements ClientModInitializer {
     public void onInitializeClient() {
         loadConfig();
         ClientTickEvents.START_CLIENT_TICK.register(MbKeysClient::tick);
-        InventoryButtons.register();
-        ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> registerCommands(dispatcher));
+
     }
 
     // ---------------------------------------------------------- public api
@@ -67,7 +65,22 @@ public class MbKeysClient implements ClientModInitializer {
         return l == null ? List.of() : l;
     }
 
-    public static boolean isCapturing() { return capturing != null; }
+    public static boolean isEnabled() { return enabled; }
+    public static String toggleDescription() {
+        if (toggleKeys.isEmpty()) return "Not set";
+        return String.join(" + ", toggleKeys.stream().map(MbKeysClient::describeKey).toList());
+    }
+    public static void beginToggleCapture(Runnable done) {
+        stopCapture();
+        capturingToggle = true;
+        toggleCaptureKeys.clear();
+        toggleCaptureDone = done;
+        IGNORED.clear();
+        long win = GLFW.glfwGetCurrentContext();
+        for (String id : ALL_IDS) if (isDown(win, id)) IGNORED.add(id);
+    }
+    public static boolean isToggleCapturing() { return capturingToggle; }
+    public static boolean isCapturing() { return capturing != null || capturingToggle; }
 
     /** index -1 means "adding a new key". */
     public static boolean isCapturing(String action, int index) {
@@ -75,6 +88,7 @@ public class MbKeysClient implements ClientModInitializer {
     }
 
     public static void beginCapture(String action, int index, Runnable done) {
+        capturingToggle = false;
         Minecraft client = Minecraft.getInstance();
         long win = GLFW.glfwGetCurrentContext();
         IGNORED.clear();
@@ -89,6 +103,8 @@ public class MbKeysClient implements ClientModInitializer {
     /** Stop capturing without calling the callback. */
     public static void stopCapture() {
         capturing = null;
+        capturingToggle = false;
+        toggleCaptureDone = null;
         capturingIndex = -1;
         onCaptureEnd = null;
     }
@@ -114,7 +130,17 @@ public class MbKeysClient implements ClientModInitializer {
     /** Only used while you are choosing a new extra key. Normal use is handled instantly by the event hooks below. */
     private static void tick(Minecraft client) {
         if (client.options == null) return;
-        if (capturing != null) pollCapture(client, GLFW.glfwGetCurrentContext());
+        long win = GLFW.glfwGetCurrentContext();
+        if (capturingToggle) pollToggleCapture(win);
+        else if (capturing != null) pollCapture(client, win);
+        if (!toggleKeys.isEmpty() && !capturingToggle && capturing == null) {
+            boolean held = toggleKeys.stream().allMatch(id -> isDown(win, id));
+            if (held && !toggleLatch) {
+                enabled = !enabled;
+                if (!enabled) releaseExtraKeys(client, win);
+            }
+            toggleLatch = held;
+        } else toggleLatch = false;
     }
 
     // ------------------------------------------- instant hooks (called by KeyMappingMixin)
@@ -129,7 +155,7 @@ public class MbKeysClient implements ClientModInitializer {
 
     /** Runs at the exact moment vanilla registers a key press, so extra keys are as fast as normal ones. */
     public static void onExtraKeyPressed(InputConstants.Key key) {
-        if (capturing != null || EXTRAS.isEmpty()) return;
+        if (!enabled || capturing != null || capturingToggle || EXTRAS.isEmpty()) return;
         Minecraft client = Minecraft.getInstance();
         if (client == null || client.options == null) return;
         String id = idOfKey(key);
@@ -155,7 +181,7 @@ public class MbKeysClient implements ClientModInitializer {
             List<String> list = EXTRAS.get(idOf(kb));
             if (list == null || !list.contains(id)) continue;
             if (pressed) {
-                if (capturing == null) kb.setDown(true);
+                if (enabled && capturing == null && !capturingToggle) kb.setDown(true);
             } else {
                 boolean stillHeld = primaryDown(win, kb);
                 for (String other : list) {
@@ -163,6 +189,39 @@ public class MbKeysClient implements ClientModInitializer {
                 }
                 if (!stillHeld) kb.setDown(false);
             }
+        }
+    }
+
+    private static void releaseExtraKeys(Minecraft client, long win) {
+        for (KeyMapping kb : client.options.keyMappings) {
+            if (EXTRAS.containsKey(idOf(kb)) && !primaryDown(win, kb)) kb.setDown(false);
+        }
+    }
+
+    private static void pollToggleCapture(long win) {
+        boolean anyDown = false;
+        for (String id : ALL_IDS) {
+            if (!isDown(win, id)) { IGNORED.remove(id); continue; }
+            if (IGNORED.contains(id)) continue;
+            anyDown = true;
+            if (id.equals("k:" + GLFW.GLFW_KEY_ESCAPE)) {
+                capturingToggle = false;
+                toggleCaptureKeys.clear();
+                Runnable done = toggleCaptureDone; toggleCaptureDone = null;
+                if (done != null) done.run();
+                return;
+            }
+            if (!toggleCaptureKeys.contains(id)) toggleCaptureKeys.add(id);
+        }
+        // Collect all keys until released, so combinations such as M+N work.
+        if (!anyDown && !toggleCaptureKeys.isEmpty()) {
+            toggleKeys = new ArrayList<>(toggleCaptureKeys);
+            toggleCaptureKeys.clear();
+            saveConfig();
+            capturingToggle = false;
+            toggleLatch = false;
+            Runnable done = toggleCaptureDone; toggleCaptureDone = null;
+            if (done != null) done.run();
         }
     }
 
@@ -270,8 +329,17 @@ public class MbKeysClient implements ClientModInitializer {
         Path p = configPath();
         if (!Files.exists(p)) return;
         try (Reader r = Files.newBufferedReader(p)) {
+            com.google.gson.JsonObject root = com.google.gson.JsonParser.parseReader(r).getAsJsonObject();
+            if (root.has("_toggle") && root.get("_toggle").isJsonArray()) {
+                toggleKeys.clear();
+                for (var item : root.getAsJsonArray("_toggle")) {
+                    String id = item.getAsString();
+                    if (id.matches("[km]:\\d+")) toggleKeys.add(id);
+                }
+            }
             Type t = new TypeToken<LinkedHashMap<String, List<String>>>() { }.getType();
-            Map<String, List<String>> m = GSON.fromJson(r, t);
+            root.remove("_toggle");
+            Map<String, List<String>> m = GSON.fromJson(root, t);
             if (m != null) {
                 EXTRAS.clear();
                 for (Map.Entry<String, List<String>> e : m.entrySet()) {
@@ -289,95 +357,12 @@ public class MbKeysClient implements ClientModInitializer {
 
     private static void saveConfig() {
         try {
-            Files.writeString(configPath(), GSON.toJson(EXTRAS));
+            Map<String, Object> config = new LinkedHashMap<>(EXTRAS);
+            config.put("_toggle", toggleKeys);
+            Files.writeString(configPath(), GSON.toJson(config));
         } catch (IOException e) {
             System.err.println("[MB Keys] Could not save config: " + e);
         }
     }
 
-    // ------------------------------------------------------------ commands
-
-    private static void registerCommands(CommandDispatcher<FabricClientCommandSource> dispatcher) {
-        SuggestionProvider<FabricClientCommandSource> actions = (ctx, builder) -> {
-            String typed = builder.getRemainingLowerCase();
-            for (KeyMapping kb : Minecraft.getInstance().options.keyMappings) {
-                String id = idOf(kb);
-                if (id.toLowerCase().contains(typed)) builder.suggest(id);
-            }
-            return builder.buildFuture();
-        };
-
-        dispatcher.register(literal("mbkeys")
-                .executes(ctx -> openScreen())
-                .then(literal("help").executes(ctx -> help(ctx.getSource())))
-                .then(literal("list").executes(ctx -> list(ctx.getSource())))
-                .then(literal("add")
-                        .then(argument("action", StringArgumentType.word()).suggests(actions)
-                                .executes(ctx -> add(ctx.getSource(), StringArgumentType.getString(ctx, "action")))))
-                .then(literal("remove")
-                        .then(argument("action", StringArgumentType.word()).suggests(actions)
-                                .executes(ctx -> remove(ctx.getSource(), StringArgumentType.getString(ctx, "action")))))
-                .then(literal("cancel").executes(ctx -> cancel(ctx.getSource()))));
-    }
-
-    private static int help(FabricClientCommandSource src) {
-        src.sendFeedback(Component.literal("MB Keys commands:"));
-        src.sendFeedback(Component.literal(" /mbkeys               - open the Simple MB Keys screen"));
-        src.sendFeedback(Component.literal(" /mbkeys add <action>    - then press the extra key (Esc cancels)"));
-        src.sendFeedback(Component.literal(" /mbkeys remove <action> - remove all extra keys from an action"));
-        src.sendFeedback(Component.literal(" /mbkeys list            - show your extra keys"));
-        src.sendFeedback(Component.literal(" Example: /mbkeys add key.jump"));
-        return 1;
-    }
-
-    private static int list(FabricClientCommandSource src) {
-        if (EXTRAS.isEmpty()) {
-            src.sendFeedback(Component.literal("No extra keys yet. Try /mbkeys add key.jump"));
-            return 1;
-        }
-        for (Map.Entry<String, List<String>> e : EXTRAS.entrySet()) {
-            StringBuilder sb = new StringBuilder(" -> ");
-            for (int i = 0; i < e.getValue().size(); i++) {
-                if (i > 0) sb.append(", ");
-                sb.append(describeKey(e.getValue().get(i)));
-            }
-            src.sendFeedback(Component.translatable(e.getKey()).append(Component.literal(sb.toString())));
-        }
-        return 1;
-    }
-
-    private static int openScreen() {
-        Minecraft client = Minecraft.getInstance();
-        client.tell(() -> client.setScreen(new MbKeysScreen(null)));
-        return 1;
-    }
-
-    private static int add(FabricClientCommandSource src, String action) {
-        Minecraft client = Minecraft.getInstance();
-        if (findBinding(client, action) == null) {
-            src.sendFeedback(Component.literal("Unknown action: " + action + " (use Tab to autocomplete)"));
-            return 0;
-        }
-        beginCapture(action, -1, null);
-        say(client, Component.literal("[MB Keys] Press the extra key for ")
-                .append(Component.translatable(action)).append(Component.literal(" (Esc to cancel)")), true);
-        return 1;
-    }
-
-    private static int remove(FabricClientCommandSource src, String action) {
-        List<String> removed = EXTRAS.remove(action);
-        if (removed == null) {
-            src.sendFeedback(Component.literal("No extra keys on " + action));
-            return 0;
-        }
-        saveConfig();
-        src.sendFeedback(Component.literal("Removed extra keys from ").append(Component.translatable(action)));
-        return 1;
-    }
-
-    private static int cancel(FabricClientCommandSource src) {
-        stopCapture();
-        src.sendFeedback(Component.literal("Cancelled."));
-        return 1;
-    }
 }

@@ -16,7 +16,7 @@ public class MbKeysScreen extends Screen {
     private int page = 0;
 
     public MbKeysScreen(Screen parent) {
-        super(Component.literal("SIMPLE MB KEYS"));
+        super(Component.literal("MB Keys"));
         this.parent = parent;
     }
 
@@ -25,10 +25,10 @@ public class MbKeysScreen extends Screen {
         int cx = this.width / 2;
         int x0 = cx - 150;
 
-        addRenderableWidget(Button.builder(Component.literal("SIMPLE MB KEYS"), b -> { })
+        addRenderableWidget(Button.builder(Component.literal("MB Keys"), b -> { })
                 .bounds(cx - 100, 6, 200, 20).build()).active = false;
 
-        int pageRows = Math.max(3, (this.height - 34 - 58) / ROW_H);
+        int pageRows = Math.max(3, (this.height - 34 - 90) / ROW_H);
         List<List<KeyMapping>> pages = new ArrayList<>();
         List<KeyMapping> cur = new ArrayList<>();
         int used = 0;
@@ -87,6 +87,13 @@ public class MbKeysScreen extends Screen {
                 }
             }
         }
+
+        addRenderableWidget(Button.builder(Component.literal(
+                MbKeysClient.isToggleCapturing() ? "Hold your ON/OFF key combination..." :
+                "Switch ON/OFF: " + MbKeysClient.toggleDescription()), b -> {
+            MbKeysClient.beginToggleCapture(this::rebuildWidgets);
+            rebuildWidgets();
+        }).bounds(cx - 150, this.height - 76, 300, 20).build());
 
         // bottom bar
         int by = this.height - 52;
