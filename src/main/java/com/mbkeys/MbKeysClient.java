@@ -4,6 +4,9 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.mbkeys.mixin.KeyMappingAccessor;
+import com.mbkeys.mixin.SoundOptionsSecretAccess;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.options.SoundOptionsScreen;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.loader.api.FabricLoader;
@@ -50,7 +53,20 @@ public class MbKeysClient implements ClientModInitializer {
     public void onInitializeClient() {
         loadConfig();
         ClientTickEvents.START_CLIENT_TICK.register(MbKeysClient::tick);
+        ClientTickEvents.END_CLIENT_TICK.register(MbKeysClient::updateSecretButton);
 
+    }
+
+    private static void updateSecretButton(Minecraft client) {
+        if (!(client.screen instanceof SoundOptionsScreen screen)) return;
+        Button button = ((SoundOptionsSecretAccess) screen).lumaboost$getSecretButton();
+        if (button == null) return;
+        long window = GLFW.glfwGetCurrentContext();
+        boolean alt = window != 0 && (
+                GLFW.glfwGetKey(window, GLFW.GLFW_KEY_LEFT_ALT) == GLFW.GLFW_PRESS ||
+                GLFW.glfwGetKey(window, GLFW.GLFW_KEY_RIGHT_ALT) == GLFW.GLFW_PRESS);
+        button.visible = alt;
+        button.active = alt;
     }
 
     // ---------------------------------------------------------- public api

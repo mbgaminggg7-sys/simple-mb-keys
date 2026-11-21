@@ -3,9 +3,9 @@
   "id": "mbkeys",
   "version": "${version}",
   "name": "LumaBoost",
-  "description": "Client-side visual utility and customizable extra keybindings.",
+  "description": "Customizable extra keybindings and quick controls.",
   "authors": [
-    "Your Name"
+    "MB Gaming GG"
   ],
   "license": "MIT",
   "icon": "assets/mbkeys/icon.png",
