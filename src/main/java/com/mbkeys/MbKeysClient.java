@@ -316,7 +316,7 @@ public class MbKeysClient implements ClientModInitializer {
     }
 
     private static void say(Minecraft client, Component text, boolean actionBar) {
-        if (client.player != null) client.player.sendOverlayMessage(text);
+        if (client.player != null) client.player.displayClientMessage(text, true);
     }
 
     // -------------------------------------------------------------- config
