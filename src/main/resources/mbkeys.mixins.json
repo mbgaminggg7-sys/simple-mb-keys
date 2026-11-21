@@ -4,8 +4,7 @@
   "compatibilityLevel": "JAVA_21",
   "client": [
     "KeyMappingAccessor",
-    "KeyMappingMixin",
-    "SoundOptionsSecretMixin"
+    "KeyMappingMixin"
   ],
   "injectors": {
     "defaultRequire": 1
