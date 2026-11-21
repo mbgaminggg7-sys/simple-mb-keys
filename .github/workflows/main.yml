@@ -18,4 +18,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: simple-mb-keys
-          path: build/libs/simple-mb-keys-*.jar
+          path: build/libs/*.jar
